@@ -1,0 +1,19 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!221 &22100000
+AnimatorOverrideController:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_Name: CatBlueAnimContOveride
+  m_Controller: {fileID: 9100000, guid: 75a7075821587e24ba5084ce4104a8e4, type: 2}
+  m_Clips:
+  - m_OriginalClip: {fileID: 7400000, guid: 26b36336c5584bc43ab993b959f627f5, type: 2}
+    m_OverrideClip: {fileID: 7400000, guid: baab8301137883447b560b954886933a, type: 2}
+  - m_OriginalClip: {fileID: 7400000, guid: 69850cbf48c74fc42a56db19830b5082, type: 2}
+    m_OverrideClip: {fileID: 7400000, guid: 89cb3f09a5a7e844fbe76362382c9f8c, type: 2}
+  - m_OriginalClip: {fileID: 7400000, guid: 715c5943ded5dbb449d29ac55de7c11d, type: 2}
+    m_OverrideClip: {fileID: 7400000, guid: 3a4189554a3ee7a4eaedc8375354f4f9, type: 2}
+  - m_OriginalClip: {fileID: 7400000, guid: 741e4089d01d4a94b98c34d66b98939b, type: 2}
+    m_OverrideClip: {fileID: 7400000, guid: a0d3d7b905fc17a48946f18431304872, type: 2}
