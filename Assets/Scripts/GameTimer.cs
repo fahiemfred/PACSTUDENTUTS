@@ -86,9 +86,31 @@ public class GameTimer : MonoBehaviour
         UpdateTimerDisplay();
     }
 
-    // Stops the timer permanently until resumed or reset.
+    // Stops the timer until resumed or reset.
     public void StopTimer()
     {
         isRunning = false;
+    }
+
+    // Returns the current elapsed gameplay time in seconds.
+    public float GetElapsedTime()
+    {
+        return elapsedTime;
+    }
+
+    // Called when the monkey successfully completes the level.
+    public void CompleteLevel()
+    {
+        // Stop counting when the level is completed.
+        StopTimer();
+
+        // Check whether the completion time is a new record.
+        if (HighScoreManager.Instance != null)
+        {
+            HighScoreManager.Instance.CheckBestTime(elapsedTime);
+        }
+
+        // Print the completion time for testing.
+        Debug.Log("Level completed in " + elapsedTime + " seconds!");
     }
 }

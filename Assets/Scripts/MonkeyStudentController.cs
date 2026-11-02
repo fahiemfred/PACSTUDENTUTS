@@ -533,6 +533,7 @@ public class MonkeyStudentController : MonoBehaviour
         Vector3 currentWorld =
             gridTilemap.GetCellCenterWorld(currentCell);
 
+        // Check all four mirrored Tilemaps.
         foreach (Tilemap tilemap in levelTilemaps)
         {
             if (tilemap == null)
@@ -550,6 +551,7 @@ public class MonkeyStudentController : MonoBehaviour
                 continue;
             }
 
+            // Check whether the current tile is a normal pellet.
             foreach (TileBase pellet in pelletTiles)
             {
                 if (pellet != null && tile == pellet)
@@ -562,16 +564,24 @@ public class MonkeyStudentController : MonoBehaviour
                         return;
                     }
 
-                    // Replace the pellet with a walkable corridor.
+                    // Replace the collected pellet with an empty corridor.
                     tilemap.SetTile(cell, emptyCorridorTile);
 
-                    // Award points.
+                    // Award 10 points.
                     if (ScoreManager.Instance != null)
                     {
                         ScoreManager.Instance.AddScore(10);
                     }
 
                     Debug.Log("Regular Pellet Collected! +10");
+
+                    // NEW: Check whether all normal pellets
+                    // and Power Pellets have been collected.
+                    if (PelletWinManager.Instance != null)
+                    {
+                        PelletWinManager.Instance.CheckForVictory();
+                    }
+
                     return;
                 }
             }

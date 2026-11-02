@@ -42,6 +42,12 @@ public class ScoreManager : MonoBehaviour
         // Update the score shown on the HUD.
         UpdateScoreDisplay();
 
+        // Check whether the current score beats the saved high score.
+        if (HighScoreManager.Instance != null)
+        {
+            HighScoreManager.Instance.CheckHighScore(currentScore);
+        }
+
         // Print the score in the Console for testing.
         Debug.Log("Score: " + currentScore.ToString("D6"));
     }
