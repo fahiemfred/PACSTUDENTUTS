@@ -3,100 +3,105 @@ using UnityEngine.Tilemaps;
 
 public class MonkeyStudentController : MonoBehaviour
 {
-    // The four Tilemaps used to build the maze.
     [Header("Maze Tilemaps")]
     public Tilemap[] levelTilemaps;
 
-    // Tile assets used for walls, pellets and empty corridors.
     [Header("Tile Types")]
     public TileBase[] wallTiles;
     public TileBase ghostWallTile;
     public TileBase[] pelletTiles;
-
-    // Replaces a regular pellet after it has been collected.
     public TileBase emptyCorridorTile;
 
-    // Number of grid cells travelled per second.
     [Header("Movement")]
     public float moveSpeed = 5f;
 
-    // Controls the monkey's directional animations.
     [Header("Animation")]
     public Animator animator;
     public SpriteRenderer monkeySprite;
 
-    // Audio for travelling through different corridor types.
     [Header("Audio")]
     public AudioSource audioSource;
     public AudioClip pelletMoveSound;
     public AudioClip emptyMoveSound;
 
-    // Custom running dust effect.
     [Header("Particles")]
     public ParticleSystem dustParticles;
 
-    // Stores the player's most recent direction input.
-    private Vector2Int lastInput = Vector2Int.zero;
+    [Header("Wall Collision Effect")]
+    public ParticleSystem wallCollisionEffect;
+    public float wallEffectCooldown = 0.3f;
 
-    // Stores the direction the monkey is currently travelling.
+    [Header("Teleporters")]
+    public Transform teleportLeft;
+    public Transform teleportRight;
+    public float teleportCooldown = 0.5f;
+
+    // Stores the player's requested and current directions.
+    private Vector2Int lastInput = Vector2Int.zero;
     private Vector2Int currentInput = Vector2Int.zero;
 
-    // Positions used to move between neighbouring cells.
+    // Positions used for grid-based movement.
     private Vector3 startPosition;
     private Vector3 targetPosition;
 
-    // Tracks progress between the current and destination cells.
     private float moveProgress = 0f;
-
-    // Prevents movement commands from interrupting a tile transition.
     private bool isMoving = false;
 
-    // Uses the unmirrored Tilemap as the reference grid.
+    // Death and respawning.
+    private bool isDead = false;
+    private Vector3 respawnPosition;
+
+    // Reference Tilemap.
     private Tilemap gridTilemap;
+
+    // Effect and teleport cooldowns.
+    private float lastWallEffectTime = -10f;
+    private float lastTeleportTime = -10f;
 
     void Start()
     {
-        // Make sure the first Tilemap has been assigned.
+        // Check that the reference Tilemap is assigned.
         if (levelTilemaps == null ||
             levelTilemaps.Length == 0 ||
             levelTilemaps[0] == null)
         {
-            Debug.LogError("Assign TilemapTopRight to Element 0!");
+            Debug.LogError(
+                "Assign TilemapTopRight to Element 0!"
+            );
 
             enabled = false;
             return;
         }
 
-        // Use the first Tilemap for grid calculations.
         gridTilemap = levelTilemaps[0];
 
-        // Find the cell containing the monkey's starting position.
+        // Snap the monkey to the centre of its starting cell.
         Vector3Int startCell =
             gridTilemap.WorldToCell(transform.position);
 
-        // Position the monkey in the centre of its starting cell.
         Vector3 centre =
             gridTilemap.GetCellCenterWorld(startCell);
 
         centre.z = transform.position.z;
+
         transform.position = centre;
 
-        // Initialise the movement positions.
+        // Initialise movement and respawn positions.
         startPosition = transform.position;
         targetPosition = transform.position;
+        respawnPosition = transform.position;
 
-        // The monkey begins stationary.
-        lastInput = Vector2Int.zero;
-        currentInput = Vector2Int.zero;
+        isMoving = false;
+        isDead = false;
 
-        // Find the SpriteRenderer if it has not been assigned.
+        // Find the monkey's SpriteRenderer if needed.
         if (monkeySprite == null)
         {
             monkeySprite =
                 GetComponentInChildren<SpriteRenderer>();
         }
 
-        // Keep the monkey upright without sprite flipping.
+        // Start facing right.
         transform.rotation = Quaternion.identity;
 
         if (monkeySprite != null)
@@ -104,34 +109,37 @@ public class MonkeyStudentController : MonoBehaviour
             monkeySprite.flipX = false;
         }
 
-        // Begin facing right with the animation paused.
         if (animator != null)
         {
             animator.SetFloat("MoveX", 1f);
             animator.SetFloat("MoveY", 0f);
             animator.SetBool("IsMoving", false);
-
             animator.speed = 0f;
         }
 
-        // Prevent dust particles from playing at the start.
+        // Stop dust particles until movement begins.
         if (dustParticles != null)
         {
             dustParticles.Stop();
         }
 
-        // Warn if the empty corridor tile has not been assigned.
         if (emptyCorridorTile == null)
         {
             Debug.LogWarning(
-                "Assign an Empty Corridor Tile to the MonkeyStudentController!"
+                "Empty Corridor Tile is not assigned!"
             );
         }
     }
 
     void Update()
     {
-        // Remember the most recently pressed WASD direction.
+        // Prevent movement during the death animation.
+        if (isDead)
+        {
+            return;
+        }
+
+        // Read WASD input.
         if (Input.GetKeyDown(KeyCode.W))
         {
             lastInput = Vector2Int.up;
@@ -152,7 +160,7 @@ public class MonkeyStudentController : MonoBehaviour
             lastInput = Vector2Int.right;
         }
 
-        // Finish travelling to the next cell before changing direction.
+        // Continue moving towards the current destination.
         if (isMoving)
         {
             Move();
@@ -165,58 +173,56 @@ public class MonkeyStudentController : MonoBehaviour
             currentInput = lastInput;
             StartMoving(currentInput);
         }
-
-        // Continue in the current direction if the new direction is blocked.
         else if (CanMove(currentInput))
         {
+            // Continue forward if the requested turn is blocked.
             StartMoving(currentInput);
         }
-
-        // Stop when neither direction is available.
         else
         {
+            // Stop when no valid movement is possible.
             StopMoving();
+
+            // Only play the effect when an actual wall is ahead.
+            if (lastInput != Vector2Int.zero &&
+                IsWallInDirection(lastInput))
+            {
+                PlayWallCollisionEffect(lastInput);
+            }
         }
     }
 
+    // Begins travelling towards the next grid cell.
     void StartMoving(Vector2Int direction)
     {
-        // Save the monkey's current world position.
         startPosition = transform.position;
 
-        // Calculate the next position in world coordinates.
-        // This supports the four mirrored Tilemaps.
         Vector3 nextPosition = startPosition +
             new Vector3(direction.x, direction.y, 0f);
 
-        // Convert the destination into a grid cell.
         Vector3Int nextCell =
             gridTilemap.WorldToCell(nextPosition);
 
-        // Find the exact centre of the destination cell.
         targetPosition =
             gridTilemap.GetCellCenterWorld(nextCell);
 
         targetPosition.z = startPosition.z;
 
-        // Begin a new tile movement.
         moveProgress = 0f;
         isMoving = true;
 
-        // Update the directional Blend Tree.
         FaceDirection(direction);
 
-        // Play the appropriate movement animation.
+        // Play the directional movement animation.
         if (animator != null)
         {
             animator.SetBool("IsMoving", true);
             animator.speed = 1f;
         }
 
-        // Play the correct movement sound.
         PlayMovementSound(nextCell);
 
-        // Start producing dust particles.
+        // Start running dust particles.
         if (dustParticles != null &&
             !dustParticles.isPlaying)
         {
@@ -224,46 +230,43 @@ public class MonkeyStudentController : MonoBehaviour
         }
     }
 
+    // Moves smoothly between grid cells.
     void Move()
     {
-        // Increase movement progress using elapsed time.
         moveProgress += Time.deltaTime * moveSpeed;
 
-        // Move linearly between the starting and destination cells.
         transform.position = Vector3.Lerp(
             startPosition,
             targetPosition,
             Mathf.Clamp01(moveProgress)
         );
 
-        // Finish the movement when the destination is reached.
+        // Finish movement when the destination is reached.
         if (moveProgress >= 1f)
         {
             transform.position = targetPosition;
-            isMoving = false;
 
-            // Check for a regular pellet at the destination.
+            isMoving = false;
+            moveProgress = 0f;
+
             CollectRegularPellet();
         }
     }
 
+    // Stops movement sounds, animation and particles.
     void StopMoving()
     {
-        // Pause the current directional animation.
         if (animator != null)
         {
             animator.SetBool("IsMoving", false);
             animator.speed = 0f;
         }
 
-        // Stop the movement sound.
-        if (audioSource != null &&
-            audioSource.isPlaying)
+        if (audioSource != null && audioSource.isPlaying)
         {
             audioSource.Stop();
         }
 
-        // Stop emitting dust particles.
         if (dustParticles != null &&
             dustParticles.isPlaying)
         {
@@ -271,15 +274,14 @@ public class MonkeyStudentController : MonoBehaviour
         }
     }
 
+    // Checks whether the next cell can be entered.
     bool CanMove(Vector2Int direction)
     {
-        // Movement is not possible without a direction.
         if (direction == Vector2Int.zero)
         {
             return false;
         }
 
-        // Calculate the destination in world space.
         Vector3 nextPosition = transform.position +
             new Vector3(direction.x, direction.y, 0f);
 
@@ -291,7 +293,7 @@ public class MonkeyStudentController : MonoBehaviour
 
         bool foundWalkableTile = false;
 
-        // Check every Tilemap at the destination position.
+        // Check all four mirrored Tilemaps.
         foreach (Tilemap tilemap in levelTilemaps)
         {
             if (tilemap == null)
@@ -299,7 +301,6 @@ public class MonkeyStudentController : MonoBehaviour
                 continue;
             }
 
-            // Convert the destination to this Tilemap's local grid.
             Vector3Int cell =
                 tilemap.WorldToCell(nextWorld);
 
@@ -310,7 +311,7 @@ public class MonkeyStudentController : MonoBehaviour
                 continue;
             }
 
-            // Normal wall tiles always block movement.
+            // Block normal walls.
             if (wallTiles != null)
             {
                 foreach (TileBase wall in wallTiles)
@@ -322,55 +323,137 @@ public class MonkeyStudentController : MonoBehaviour
                 }
             }
 
-            // Ghost wall tiles also block the monkey.
+            // Block ghost-only walls.
             if (ghostWallTile != null &&
                 tile == ghostWallTile)
             {
                 return false;
             }
 
-            // A tile exists that is not a wall.
             foundWalkableTile = true;
         }
 
-        // Allow movement through regular corridors.
         if (foundWalkableTile)
         {
             return true;
         }
 
-        // Check animated super pellets stored as separate GameObjects.
+        // Allow movement into animated super pellet cells.
         GameObject[] superPellets =
             GameObject.FindGameObjectsWithTag("SuperPellet");
 
         foreach (GameObject pellet in superPellets)
         {
-            // Find the reference grid cell containing this super pellet.
             Vector3Int pelletCell =
                 gridTilemap.WorldToCell(
                     pellet.transform.position
                 );
 
-            // Allow the monkey to enter a super pellet cell.
             if (pelletCell == nextCell)
             {
                 return true;
             }
         }
 
-        // Prevent movement outside valid maze cells.
         return false;
     }
 
+    // Checks whether a blocked direction contains a wall.
+    bool IsWallInDirection(Vector2Int direction)
+    {
+        if (direction == Vector2Int.zero)
+        {
+            return false;
+        }
+
+        Vector3 nextPosition = transform.position +
+            new Vector3(direction.x, direction.y, 0f);
+
+        Vector3Int nextCell =
+            gridTilemap.WorldToCell(nextPosition);
+
+        Vector3 nextWorld =
+            gridTilemap.GetCellCenterWorld(nextCell);
+
+        foreach (Tilemap tilemap in levelTilemaps)
+        {
+            if (tilemap == null)
+            {
+                continue;
+            }
+
+            Vector3Int cell =
+                tilemap.WorldToCell(nextWorld);
+
+            TileBase tile = tilemap.GetTile(cell);
+
+            if (tile == null)
+            {
+                continue;
+            }
+
+            // Detect normal walls.
+            if (wallTiles != null)
+            {
+                foreach (TileBase wall in wallTiles)
+                {
+                    if (wall != null && tile == wall)
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            // Detect ghost-only walls.
+            if (ghostWallTile != null &&
+                tile == ghostWallTile)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    // Creates a particle burst when the monkey hits a wall.
+    void PlayWallCollisionEffect(Vector2Int direction)
+    {
+        if (wallCollisionEffect == null)
+        {
+            return;
+        }
+
+        // Limit how frequently the effect can appear.
+        if (Time.time - lastWallEffectTime < wallEffectCooldown)
+        {
+            return;
+        }
+
+        lastWallEffectTime = Time.time;
+
+        // Spawn the effect slightly in front of the monkey.
+        Vector3 effectPosition = transform.position +
+            new Vector3(direction.x, direction.y, 0f) * 0.5f;
+
+        ParticleSystem effect = Instantiate(
+            wallCollisionEffect,
+            effectPosition,
+            Quaternion.identity
+        );
+
+        effect.Play();
+
+        Destroy(effect.gameObject, 2f);
+    }
+
+    // Updates the monkey's directional animation.
     void FaceDirection(Vector2Int direction)
     {
-        // Stops flipping
         if (monkeySprite != null)
         {
             monkeySprite.flipX = false;
         }
 
-        // Update the Blend Tree parameters.
         if (animator != null)
         {
             animator.SetFloat("MoveX", direction.x);
@@ -378,21 +461,19 @@ public class MonkeyStudentController : MonoBehaviour
         }
     }
 
+    // Plays the correct sound for the destination cell.
     void PlayMovementSound(Vector3Int nextCell)
     {
-        // Do nothing if the AudioSource has not been assigned.
         if (audioSource == null)
         {
             return;
         }
 
-        // Find the world position of the next cell.
         Vector3 nextWorld =
             gridTilemap.GetCellCenterWorld(nextCell);
 
         bool hasPellet = false;
 
-        // Check the Tilemaps for a regular pellet.
         foreach (Tilemap tilemap in levelTilemaps)
         {
             if (tilemap == null)
@@ -410,7 +491,6 @@ public class MonkeyStudentController : MonoBehaviour
                 continue;
             }
 
-            // Check whether the tile is one of the regular pellet types.
             foreach (TileBase pellet in pelletTiles)
             {
                 if (pellet != null && tile == pellet)
@@ -426,18 +506,15 @@ public class MonkeyStudentController : MonoBehaviour
             }
         }
 
-        // Choose the pellet sound or empty corridor sound.
         AudioClip selectedSound =
             hasPellet ? pelletMoveSound : emptyMoveSound;
 
-        // Stop audio if the selected clip is missing.
         if (selectedSound == null)
         {
             audioSource.Stop();
             return;
         }
 
-        // Avoid restarting the same clip unnecessarily.
         if (audioSource.clip != selectedSound ||
             !audioSource.isPlaying)
         {
@@ -447,16 +524,15 @@ public class MonkeyStudentController : MonoBehaviour
         }
     }
 
+    // Collects regular pellets and awards 10 points.
     void CollectRegularPellet()
     {
-        // Find the monkey's current reference grid cell.
         Vector3Int currentCell =
             gridTilemap.WorldToCell(transform.position);
 
         Vector3 currentWorld =
             gridTilemap.GetCellCenterWorld(currentCell);
 
-        // Search all four Tilemaps for a regular pellet.
         foreach (Tilemap tilemap in levelTilemaps)
         {
             if (tilemap == null)
@@ -464,7 +540,6 @@ public class MonkeyStudentController : MonoBehaviour
                 continue;
             }
 
-            // Find the corresponding cell on this Tilemap.
             Vector3Int cell =
                 tilemap.WorldToCell(currentWorld);
 
@@ -475,35 +550,171 @@ public class MonkeyStudentController : MonoBehaviour
                 continue;
             }
 
-            // Compare the current tile with the assigned pellet tiles.
             foreach (TileBase pellet in pelletTiles)
             {
                 if (pellet != null && tile == pellet)
                 {
-                    // Replace the collected pellet with an empty corridor tile. This keeps the cell walkable after collection.
                     if (emptyCorridorTile == null)
                     {
                         Debug.LogError(
-                            "Cannot collect pellet: Empty Corridor Tile is not assigned!"
+                            "Empty Corridor Tile is not assigned!"
                         );
-
                         return;
                     }
 
+                    // Replace the pellet with a walkable corridor.
                     tilemap.SetTile(cell, emptyCorridorTile);
 
-                    // Award 10 points.
+                    // Award points.
                     if (ScoreManager.Instance != null)
                     {
                         ScoreManager.Instance.AddScore(10);
                     }
 
                     Debug.Log("Regular Pellet Collected! +10");
-
-                    // Stop after collecting this pellet.
                     return;
                 }
             }
         }
+    }
+
+    // Stops the monkey and plays its death animation.
+    public void PlayDeathAnimation()
+    {
+        if (isDead)
+        {
+            return;
+        }
+
+        isDead = true;
+
+        isMoving = false;
+        moveProgress = 0f;
+
+        lastInput = Vector2Int.zero;
+        currentInput = Vector2Int.zero;
+
+        if (audioSource != null)
+        {
+            audioSource.Stop();
+        }
+
+        if (dustParticles != null)
+        {
+            dustParticles.Stop();
+        }
+
+        if (animator != null)
+        {
+            animator.speed = 1f;
+            animator.Play("MonkeyDeath", 0, 0f);
+        }
+
+        Debug.Log("Monkey death animation started!");
+    }
+
+    // Returns the monkey to its original starting position.
+    public void RespawnMonkey()
+    {
+        transform.position = respawnPosition;
+
+        startPosition = respawnPosition;
+        targetPosition = respawnPosition;
+
+        moveProgress = 0f;
+        isMoving = false;
+
+        lastInput = Vector2Int.zero;
+        currentInput = Vector2Int.zero;
+
+        transform.rotation = Quaternion.identity;
+
+        if (monkeySprite != null)
+        {
+            monkeySprite.flipX = false;
+        }
+
+        if (animator != null)
+        {
+            animator.speed = 1f;
+            animator.Play("MonkeyMovement", 0, 0f);
+
+            animator.SetFloat("MoveX", 1f);
+            animator.SetFloat("MoveY", 0f);
+            animator.SetBool("IsMoving", false);
+
+            animator.speed = 0f;
+        }
+
+        isDead = false;
+
+        Debug.Log("Monkey respawned!");
+    }
+
+    // Teleports the monkey between the maze's left and right entrances.
+    public void TeleportMonkey(bool teleportToRight)
+    {
+        // Do not teleport during the death animation.
+        if (isDead)
+        {
+            return;
+        }
+
+        // Prevent rapid repeated teleportation.
+        if (Time.time - lastTeleportTime < teleportCooldown)
+        {
+            return;
+        }
+
+        // Select the opposite entrance.
+        Transform destination = teleportToRight
+            ? teleportRight
+            : teleportLeft;
+
+        if (destination == null)
+        {
+            Debug.LogWarning(
+                "Teleporter destination is not assigned!"
+            );
+            return;
+        }
+
+        lastTeleportTime = Time.time;
+
+        // Place the monkey at the destination.
+        Vector3 newPosition = destination.position;
+        newPosition.z = transform.position.z;
+
+        // Snap to the centre of the destination grid cell.
+        if (gridTilemap != null)
+        {
+            Vector3Int destinationCell =
+                gridTilemap.WorldToCell(newPosition);
+
+            Vector3 cellCentre =
+                gridTilemap.GetCellCenterWorld(destinationCell);
+
+            cellCentre.z = newPosition.z;
+            newPosition = cellCentre;
+        }
+
+        transform.position = newPosition;
+
+        // Reset movement positions so Lerp does not pull
+        // the monkey back to its previous location.
+        startPosition = newPosition;
+        targetPosition = newPosition;
+
+        moveProgress = 0f;
+        isMoving = false;
+
+        // Clear stored movement directions.
+        lastInput = Vector2Int.zero;
+        currentInput = Vector2Int.zero;
+
+        // Stop movement effects until the player moves again.
+        StopMoving();
+
+        Debug.Log("Monkey teleported!");
     }
 }

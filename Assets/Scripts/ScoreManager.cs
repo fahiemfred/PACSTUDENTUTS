@@ -1,13 +1,18 @@
 using UnityEngine;
+using TMPro;
 
 public class ScoreManager : MonoBehaviour
 {
     // Allows other scripts to access the ScoreManager.
     public static ScoreManager Instance;
 
-    // Stores the player's current score.
+    // Stores the monkey's current score.
     [Header("Score")]
     public int currentScore = 0;
+
+    // Reference to the existing ScoreText on the HUD.
+    [Header("HUD")]
+    public TextMeshProUGUI scoreText;
 
     void Awake()
     {
@@ -18,16 +23,37 @@ public class ScoreManager : MonoBehaviour
             return;
         }
 
-        // Register this object as the active ScoreManager.
+        // Set this object as the active ScoreManager.
         Instance = this;
     }
 
-    // Adds points to the player's current score.
+    void Start()
+    {
+        // Display the starting score when the game begins.
+        UpdateScoreDisplay();
+    }
+
+    // Called whenever the monkey collects a scoring item.
     public void AddScore(int points)
     {
+        // Increase the score by the specified amount.
         currentScore += points;
 
-        // Display the score using six digits.
+        // Update the score shown on the HUD.
+        UpdateScoreDisplay();
+
+        // Print the score in the Console for testing.
         Debug.Log("Score: " + currentScore.ToString("D6"));
+    }
+
+    // Updates the existing ScoreText.
+    void UpdateScoreDisplay()
+    {
+        // Only update the text if it has been assigned.
+        if (scoreText != null)
+        {
+            // D6 displays the score using at least six digits.
+            scoreText.text = "SCORE: " + currentScore.ToString("D6");
+        }
     }
 }
